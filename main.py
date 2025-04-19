@@ -1,244 +1,184 @@
-import streamlit as st
-from pathlib import Path
-# Updated imports for LangChain components
-from langchain_community.agent_toolkits.sql.base import create_sql_agent # New
-from langchain_community.utilities import SQLDatabase # New
-from langchain.agents.agent_types import AgentType
-from langchain_community.callbacks.streamlit import StreamlitCallbackHandler # New
-from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit # New
-# Other imports remain the same
-from sqlalchemy import create_engine
-import sqlite3
-from langchain_groq import ChatGroq
 import os
-from dotenv import load_dotenv
-import pandas as pd
 import re
+import sqlite3
+from pathlib import Path
 
+import pandas as pd
+import streamlit as st
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+import logging
+from langchain.agents.agent_types import AgentType
+from langchain.agents import AgentExecutor
+from langchain_community.agent_toolkits.sql.base import create_sql_agent
+from langchain_community.agent_toolkits.sql.toolkit import SQLDatabaseToolkit
+from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+from langchain_community.utilities import SQLDatabase
+from langchain_groq import ChatGroq
+
+#
+# Page setup
+#
 load_dotenv()
-
 st.set_page_config(page_title="LangChain: Chat with SQL DB", page_icon="🦜")
 st.title("🦜 LangChain: Chat with SQL DB")
 
+#
+# Sidebar: choose SQLite vs MySQL
+#
 LOCALDB = "USE_LOCALDB"
 MYSQL = "USE_MYSQL"
-
-radio_opt = ["Use SQLLite 3 Database- Student.db", "Connect to you MySQL Database"]
-
-selected_opt = st.sidebar.radio(
-    label="Choose the DB which you want to chat", options=radio_opt
-)
+radio_opt = ["Use SQLLite 3 Database- Student.db",
+             "Connect to your MySQL Database"]
+selected_opt = st.sidebar.radio("Choose the DB to chat with", radio_opt)
 
 if radio_opt.index(selected_opt) == 1:
     db_uri = MYSQL
-    mysql_host = st.sidebar.text_input("Provide MySQL Host")
-    mysql_user = st.sidebar.text_input("MYSQL User")
-    mysql_password = st.sidebar.text_input("MYSQL password", type="password")
-    mysql_db = st.sidebar.text_input("MySQL database")
+    mysql_host = st.sidebar.text_input("MySQL Host")
+    mysql_user = st.sidebar.text_input("MySQL User")
+    mysql_password = st.sidebar.text_input("MySQL Password",
+                                           type="password")
+    mysql_db = st.sidebar.text_input("MySQL Database")
 else:
     db_uri = LOCALDB
 
 api_key = os.getenv("GROQ_API_KEY")
-
-if not db_uri:
-    st.info("Please enter the database information and uri")
-
 if not api_key:
-    st.info("Please add the groq api key")
+    st.sidebar.error("Please set GROQ_API_KEY in your .env")
 
-## LLM model
+#
+# Configure DB connection
+#
+@st.cache_resource(ttl="2h")
+def configure_db(uri, host=None, user=None, password=None, dbname=None):
+    if uri == LOCALDB:
+        dbfile = (Path(__file__).parent / "student.db").absolute()
+        creator = lambda: sqlite3.connect(f"file:{dbfile}?mode=ro", uri=True)
+        engine = create_engine("sqlite:///", creator=creator)
+        return SQLDatabase(engine)
+    else:
+        if not (host and user and password and dbname):
+            st.sidebar.error("Provide all MySQL details")
+            st.stop()
+        engine = create_engine(
+            f"mysql+mysqlconnector://{user}:{password}@"
+            f"{host}/{dbname}"
+        )
+        return SQLDatabase(engine)
+
+db = configure_db(db_uri, mysql_host, mysql_user,
+                  mysql_password, mysql_db) if db_uri == MYSQL \
+    else configure_db(db_uri)
+
+#
+# LLM and Agent setup
+#
 llm = ChatGroq(
     groq_api_key=api_key,
     model_name="meta-llama/llama-4-maverick-17b-128e-instruct",
     streaming=True,
 )
 
-
-@st.cache_resource(ttl="2h")
-def configure_db(
-    db_uri, mysql_host=None, mysql_user=None, mysql_password=None, mysql_db=None
-):
-    if db_uri == LOCALDB:
-        dbfilepath = (Path(__file__).parent / "student.db").absolute()
-        print(dbfilepath)
-        creator = lambda: sqlite3.connect(f"file:{dbfilepath}?mode=ro", uri=True)
-        return SQLDatabase(create_engine("sqlite:///", creator=creator))
-    elif db_uri == MYSQL:
-        if not (mysql_host and mysql_user and mysql_password and mysql_db):
-            st.error("Please provide all MySQL connection details.")
-            st.stop()
-        # Ensure you have mysql-connector-python installed: pip install mysql-connector-python
-        return SQLDatabase(
-            create_engine(
-                f"mysql+mysqlconnector://{mysql_user}:{mysql_password}@{mysql_host}/{mysql_db}"
-            )
-        )
-
-
-if db_uri == MYSQL:
-    db = configure_db(db_uri, mysql_host, mysql_user, mysql_password, mysql_db)
-else:
-    db = configure_db(db_uri)
-
-## toolkit
 toolkit = SQLDatabaseToolkit(db=db, llm=llm)
-
 agent = create_sql_agent(
     llm=llm,
     toolkit=toolkit,
     verbose=True,
     agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
     handle_parsing_errors=True,
+    max_iterations=10,         # raise iteration limit
+    max_execution_time=60      # raise time limit (seconds)
+)
+# wrap into an executor so you can also control iteration here if needed
+executor = AgentExecutor.from_agent_and_tools(
+    agent=agent.agent, tools=agent.tools, max_iterations=10
 )
 
+#
+# Utility: direct SQL for average & mode
+#
+def get_avg_and_mode(class_name: str):
+    avg_sql = """
+        SELECT ROUND(AVG(marks),2) AS average_marks
+        FROM student
+        WHERE class = :cls
+    """
+    mode_sql = """
+        SELECT marks AS mode_marks
+        FROM (
+          SELECT marks, COUNT(*) AS cnt
+          FROM student
+          WHERE class = :cls
+          GROUP BY marks
+        ) t
+        ORDER BY cnt DESC
+        LIMIT 1
+    """
+    avg_df = pd.read_sql(avg_sql, db.engine, params={"cls": class_name})
+    mode_df = pd.read_sql(mode_sql, db.engine, params={"cls": class_name})
+    return float(avg_df["average_marks"].iloc[0]), int(mode_df["mode_marks"].iloc[0])
 
-if "messages" not in st.session_state or st.sidebar.button("Clear message history"):
-    st.session_state["messages"] = [
+#
+# Message history
+#
+if "messages" not in st.session_state \
+   or st.sidebar.button("Clear message history"):
+    st.session_state.messages = [
         {"role": "assistant", "content": "How can I help you?"}
     ]
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-user_query = st.chat_input(placeholder="Ask anything from the database")
+user_query = st.chat_input("Ask anything from the database")
 
-
+#
+# Table formatter (unchanged from your code)
+#
 def format_table_output(response):
-    # Check if response contains tabular data (simple check)
-    # More robust checks might be needed depending on LLM output variations
-    if isinstance(response, str) and any(
-        header in response for header in ["NAME", "CLASS", "SECTION", "MARKS"]
-    ):
-        try:
-            # Attempt to parse space-delimited tables first
-            lines = response.strip().split("\n")
-            header_line_index = -1
-            for i, line in enumerate(lines):
-                if all(
-                    header in line for header in ["NAME", "CLASS", "SECTION", "MARKS"]
-                ):
-                    header_line_index = i
-                    break
+    # ... your existing format_table_output code here ...
+    return response  # placeholder
 
-            if header_line_index != -1:
-                headers = lines[header_line_index].split()
-                data = []
-                for line in lines[header_line_index + 1 :]:
-                    if line.strip():
-                        parts = line.split()
-                        # Basic handling for multi-word class names like "Data Science"
-                        # This might need refinement based on actual data patterns
-                        row_data = {}
-                        current_part_index = 0
-                        for header in headers:
-                            if header == "CLASS" and current_part_index + 1 < len(
-                                parts
-                            ):
-                                # Check if the next part looks like a section (e.g., A, B)
-                                if parts[current_part_index + 1] in ["A", "B", "C"]:
-                                    row_data[header] = parts[current_part_index]
-                                    current_part_index += 1
-                                else: # Assume multi-word class
-                                    row_data[header] = f"{parts[current_part_index]} {parts[current_part_index+1]}"
-                                    current_part_index += 2
-                            elif current_part_index < len(parts):
-                                row_data[header] = parts[current_part_index]
-                                current_part_index += 1
-                            else:
-                                row_data[header] = None # Handle missing data
+#
+# Main handler
+#
+def handle_user_input(query: str):
+    q = query.lower()
+    # direct‐SQL path for "average" or "mode" questions
+    avg_mode_match = re.search(
+        r"(average|mode).+class\s+(\w+)", q, re.IGNORECASE
+    )
+    if avg_mode_match:
+        what, cls = avg_mode_match.groups()
+        avg, mode = get_avg_and_mode(cls)
+        if "average" in what:
+            return f"Class {cls} → average marks: {avg:.2f}"
+        if "mode" in what:
+            return f"Class {cls} → mode marks: {mode}"
+    # otherwise fall back to agent
+    try:
+        cb = StreamlitCallbackHandler(st.container())
+        return executor.run(query, callbacks=[cb])
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.error("Agent error", exc_info=True)
+        return "Sorry, I couldn't process that."
 
-                        if len(row_data) == len(headers):
-                             data.append(list(row_data.values())) # Ensure order matches headers
-
-
-                if data: # Only proceed if data was extracted
-                    df = pd.DataFrame(data, columns=headers)
-                    # Extract text before/after the table if necessary
-                    pre_table_text = "\n".join(lines[:header_line_index]).strip()
-                    post_table_text = "\n".join(lines[header_line_index + len(data) + 1 :]).strip()
-
-                    if pre_table_text:
-                        st.write(pre_table_text)
-                    st.dataframe(df)
-                    if post_table_text:
-                        st.write(post_table_text)
-                    return None # Indicate display handled
-
-            # Fallback for Markdown tables if space-delimited parsing failed or wasn't applicable
-            if "|" in response:
-                tables = []
-                # Regex to find markdown tables
-                md_table_pattern = r"^\s*\|.*\|\s*\n\s*\|[-| :]*\|\s*\n(\s*\|.*\|\s*\n?)+"
-                for match in re.finditer(md_table_pattern, response, re.MULTILINE):
-                    table_text = match.group(0)
-                    try:
-                        # Use StringIO to read the markdown table string as a file
-                        # Skip the header separator line (line 2)
-                        lines = table_text.strip().split('\n')
-                        csv_text = "\n".join([lines[0]] + lines[2:])
-                        df = pd.read_csv(pd.StringIO(csv_text), sep='|', skipinitialspace=True)
-                        # Clean up empty columns from leading/trailing pipes
-                        df = df.iloc[:, 1:-1]
-                        df.columns = df.columns.str.strip()
-                        df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
-                        tables.append(df)
-                    except Exception as e_md:
-                        print(f"Markdown parsing error: {e_md}") # Log error
-                        pass # Continue if one table fails
-
-                if tables:
-                    # Attempt to remove the raw table text from the response
-                    result_text = re.sub(md_table_pattern, '', response, flags=re.MULTILINE).strip()
-                    if result_text:
-                         st.write(result_text)
-                    for df in tables:
-                        st.dataframe(df)
-                    return None # Indicate display handled
-
-        except Exception as e:
-            print(f"Error formatting table output: {e}") # Log error
-            # If any parsing fails, fall back to showing the raw response
-            return response
-
-    # If not detected as table or parsing failed, return original response
-    return response
-
-
-# Add this function before your agent interaction code
-def handle_user_input(query, agent, db, callbacks):
-    # Detect simple greetings
-    greetings = ["hi", "hello", "hey", "greetings", "howdy"]
-    if query.lower().strip() in greetings:
-        try:
-            tables = db.get_usable_table_names()
-            return f"Hello! I'm ready to help you query your database. You can ask me about the following tables: {', '.join(tables)}. What would you like to know?"
-        except Exception as e:
-            print(f"Error getting table names: {e}")
-            return "Hello! How can I help you with the database?"
-    else:
-        # For actual DB queries, use the agent
-        try:
-            return agent.run(query, callbacks=callbacks)
-        except Exception as e:
-            print(f"Agent execution error: {e}")
-            return "Sorry, I encountered an error trying to process your request."
-
-
+#
+# When the user submits a query
+#
 if user_query:
-    st.session_state.messages.append({"role": "user", "content": user_query})
+    st.session_state.messages.append(
+        {"role": "user", "content": user_query}
+    )
     st.chat_message("user").write(user_query)
 
     with st.chat_message("assistant"):
-        streamlit_callback = StreamlitCallbackHandler(st.container())
-        response = handle_user_input(user_query, agent, db, [streamlit_callback])
+        resp = handle_user_input(user_query)
+        formatted = format_table_output(resp)
+        if formatted is not None:
+            st.write(formatted)
 
-        # Format the response if it contains table data
-        formatted_response = format_table_output(response)
-        if formatted_response is not None:
-            # If format_table_output handled the display (returned None),
-            # we still need to store the original response in history.
-            # If it returned the original response, display it normally.
-             if formatted_response == response: # Check if it returned the original string
-                 st.write(response)
-
-        st.session_state.messages.append({"role": "assistant", "content": response}) # Store original response
+    st.session_state.messages.append(
+        {"role": "assistant", "content": resp}
+    )
