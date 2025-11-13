@@ -30,3 +30,11 @@ unstructured
 pytube
 numexpr
 huggingface_hub
+streamlit
+agno
+Flask
+yfinance
+duckduckgo-search
+groq
+google-genai
+flask-cors
