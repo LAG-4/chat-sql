@@ -8,3 +8,7 @@ langchain-google-genai
 agno
 google-generativeai
 mysql-connector-python
+yfinance
+duckduckgo-search
+ddgs
+google-genai
