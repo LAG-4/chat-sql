@@ -34,10 +34,6 @@ st.set_page_config(
     page_icon="✨",
     layout="wide"
 )
-
-# ============================================================================
-# SIDEBAR - Mode Selection
-# ============================================================================
 st.sidebar.title("✨ AI Assistant Hub")
 st.sidebar.markdown("---")
 
@@ -48,15 +44,13 @@ app_mode = st.sidebar.radio(
 
 st.sidebar.markdown("---")
 
-# ============================================================================
-# FINANCIAL ANALYSIS MODE
-# ============================================================================
+
 if app_mode == "💰 Financial Analysis":
     st.title("📈 Quantum Finance")
     st.subheader("AI-Powered Market Analysis")
     st.markdown("---")
     
-    # Create a single comprehensive financial agent
+
     financial_agent = Agent(
         name="Comprehensive Financial Agent",
         model=Gemini(id="gemini-2.5-flash"),
@@ -75,7 +69,7 @@ if app_mode == "💰 Financial Analysis":
         markdown=True,
     )
     
-    # Tabs
+
     tab1, tab2 = st.tabs(["📊 Market Analysis", "💬 AI Assistant"])
     
     with tab1:
@@ -93,11 +87,11 @@ if app_mode == "💰 Financial Analysis":
             )
             
         with col3:
-            st.write("")  # spacing
-            st.write("")  # spacing
+            st.write("")  
+            st.write("")  
             analyze_button = st.button("🔍 Analyze", use_container_width=True, type="primary")
         
-        # Quick stock buttons
+
         st.write("**Popular stocks:**")
         col1, col2, col3, col4 = st.columns(4)
         
@@ -110,7 +104,7 @@ if app_mode == "💰 Financial Analysis":
         
         st.markdown("---")
         
-        # Display analysis
+
         if analyze_button and stock_symbol:
             with st.spinner('🔄 Analyzing market data...'):
                 try:
@@ -133,7 +127,7 @@ if app_mode == "💰 Financial Analysis":
                         4. Get current stock price
                         5. Provide outlook based on news sentiment"""
                         
-                    else:  # Quick Overview
+                    else:  
                         prompt = f"""Provide a quick overview for {stock_symbol}:
                         1. Current price and today's change
                         2. Key metrics (P/E, Market Cap)
@@ -154,8 +148,7 @@ if app_mode == "💰 Financial Analysis":
     with tab2:
         st.header("AI Financial Assistant")
         st.write("Ask questions about markets, stocks, or investment strategies.")
-        
-        # Example questions
+
         st.write("**Try asking about:**")
         col1, col2 = st.columns(2)
         
@@ -218,15 +211,13 @@ if app_mode == "💰 Financial Analysis":
                 st.session_state.finance_chat_history = []
                 st.rerun()
 
-# ============================================================================
-# SQL DATABASE CHAT MODE
-# ============================================================================
+
 elif app_mode == "🗄️ SQL Database Chat":
     st.title("🗄️ SQL Database Chat")
     st.subheader("Chat with your database using natural language")
     st.markdown("---")
     
-    # Database selection in sidebar
+
     LOCALDB = "USE_LOCALDB"
     MYSQL = "USE_MYSQL"
     
@@ -248,13 +239,13 @@ elif app_mode == "🗄️ SQL Database Chat":
         st.sidebar.error("⚠️ Please set GEMINI_API_KEY in your .env file")
         st.stop()
     
-    # Configure database
+
     @st.cache_resource(ttl="2h")
     def configure_db(uri, host=None, user=None, password=None, dbname=None):
         if uri == LOCALDB:
             dbfile = (Path(__file__).parent / "student.db").absolute()
             
-            # Create database if it doesn't exist
+            
             if not dbfile.exists():
                 conn = sqlite3.connect(str(dbfile))
                 cursor = conn.cursor()
@@ -302,8 +293,7 @@ elif app_mode == "🗄️ SQL Database Chat":
     except Exception as e:
         st.sidebar.error(f"❌ Connection failed: {str(e)}")
         st.stop()
-    
-    # LLM and Agent setup - Using Gemini 2.5 Flash
+
     try:
         llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
@@ -332,7 +322,7 @@ elif app_mode == "🗄️ SQL Database Chat":
         st.error(f"❌ Failed to initialize SQL agent: {str(e)}")
         st.stop()
     
-    # Utility functions
+
     def get_avg_and_mode(class_name: str):
         try:
             avg_sql = """
@@ -384,11 +374,9 @@ elif app_mode == "🗄️ SQL Database Chat":
         except Exception as e:
             logging.getLogger(__name__).error("Agent error", exc_info=True)
             return f"Sorry, I couldn't process that query. Error: {str(e)}"
-    
-    # Chat interface
+
     st.info("💡 Use natural language to query your database")
-    
-    # Example questions
+
     st.write("**Example questions:**")
     col1, col2, col3 = st.columns(3)
     
@@ -404,26 +392,24 @@ elif app_mode == "🗄️ SQL Database Chat":
     
     st.markdown("---")
     
-    # Message history
+
     if "sql_messages" not in st.session_state or st.sidebar.button("🗑️ Clear Chat History"):
         st.session_state.sql_messages = [
             {"role": "assistant", "content": "Hello! I'm your SQL assistant. Ask me anything about the database."}
         ]
     
-    # Display chat history
+
     for msg in st.session_state.sql_messages:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
-    
-    # Chat input
+
     user_query = st.chat_input("Ask a question about the database...")
-    
-    # Handle preset questions
+
     if "sql_preset" in st.session_state:
         user_query = st.session_state.sql_preset
         del st.session_state.sql_preset
     
-    # Process user query
+
     if user_query:
         st.session_state.sql_messages.append({"role": "user", "content": user_query})
         
@@ -440,10 +426,7 @@ elif app_mode == "🗄️ SQL Database Chat":
             {"role": "assistant", "content": formatted_response}
         )
 
-# ============================================================================
-# AI ADVISORS MODE
-# ============================================================================
-else:  # AI Advisors mode
+else:  
     st.title("🎭 AI Advisors Council")
     st.subheader("Get advice from multiple AI personalities")
     st.markdown("---")
@@ -484,15 +467,14 @@ else:  # AI Advisors mode
     }
         return avatars.get(agent_name, "https://cdn-icons-png.flaticon.com/512/4712/4712109.png")  # Default robot avatar
     
-    # Display active advisors in sidebar
+
     st.sidebar.subheader("🎭 Active Advisors")
     st.sidebar.markdown("---")
     for agent_name in AGENTS.keys():
         avatar = get_avatar(agent_name)
         display_name = agent_name.replace("Dr", "Dr. ")
         st.sidebar.write(f"{display_name}")
-    
-    # Async function to query individual advisor
+
     async def ask_advisor(
         system_prompt: str,
         user_prompt: str,
@@ -508,7 +490,7 @@ else:  # AI Advisors mode
         except Exception as e:
             return f"Error: {str(e)}"
     
-    # Query all advisors
+
     async def query_council(question: str) -> Dict:
         tasks = [ask_advisor(system_prompt, question) for system_prompt in AGENTS.values()]
         answers = await asyncio.gather(*tasks)
@@ -534,38 +516,37 @@ else:  # AI Advisors mode
     
     st.markdown("---")
     
-    # Initialize messages
+
     if "advisor_messages" not in st.session_state:
         st.session_state.advisor_messages = []
     
-    # Display message history
+
     for message in st.session_state.advisor_messages:
         with st.chat_message(message["role"], avatar=message.get("avatar")):
             if message["role"] != "user":
                 st.markdown(f"**{message['role']}**")
             st.write(message["content"])
-    
-    # Chat input
+
     prompt = st.chat_input("Ask the AI council for advice...")
     
-    # Handle preset questions
+
     if "advisor_preset" in st.session_state:
         prompt = st.session_state.advisor_preset
         del st.session_state.advisor_preset
     
-    # Process user input
+
     if prompt:
-        # Add user message
+       
         st.session_state.advisor_messages.append({"role": "user", "content": prompt, "avatar": "👤"})
         with st.chat_message("user", avatar="👤"):
             st.write(prompt)
         
-        # Query all advisors
+       
         with st.spinner("🎭 The council is deliberating..."):
             try:
                 res = asyncio.run(query_council(prompt))
                 
-                # Display each advisor's response
+                
                 for member in res["members"]:
                     agent_name = member["agent"]
                     answer = member["answer"]
@@ -585,13 +566,12 @@ else:  # AI Advisors mode
                 st.error(f"❌ Error: {str(e)}")
                 st.info("💡 Tip: Make sure you have GEMINI_API_KEY set in your .env file")
     
-    # Clear chat button
+
     if st.session_state.advisor_messages:
         st.markdown("---")
         if st.button("🗑️ Clear Conversation", use_container_width=True):
             st.session_state.advisor_messages = []
             st.rerun()
 
-# Footer
 st.sidebar.markdown("---")
 st.sidebar.info("🤖 Powered by Gemini 2.5 Flash")
